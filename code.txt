@@ -1,0 +1,409 @@
+Use CorsoSQL
+/*Creaiamo una tabella di staging con i campi occorrenti, 
+Non creo vincoli per ora perché mi ha dato problemi nel successivo import */
+
+CREATE TABLE dbo.StagingEsperimento(
+	IdEsperimento varchar(255),
+	Data  varchar(255),
+	Operatore varchar(255),
+	Valore varchar(255),
+	Molecola varchar(255),
+	)
+GO
+
+SELECT * from StagingEsperimento
+
+/*Eseguiamo la BULK INSERT */
+	
+BULK INSERT dbo.StagingEsperimento
+FROM '...\Progetto_Esperimenti.csv'
+WITH
+(   
+    FIRSTROW = 2,
+    FIELDTERMINATOR = ';', 
+    ROWTERMINATOR = '\n',   
+    TABLOCK
+)
+
+SELECT * from StagingEsperimento
+/*testiamo alcune righe e il numero totale per verificare l'importazione*/
+SELECT * from StagingEsperimento
+WHERE IdEsperimento = 113
+
+SELECT * from StagingEsperimento
+WHERE IdEsperimento = 321
+
+SELECT * from StagingEsperimento
+WHERE IdEsperimento = 209
+
+select count (*) from StagingEsperimento
+
+/*Trasformiamo la tabella modificando il formato
+Per la colonna Valore usiamo la funzione replace per sostituire la virgola col punto come separatore*/
+SELECT CAST(IdEsperimento AS INT) AS IdEsperimento,
+	CONVERT(date, Data, 103) AS Data,
+	Operatore,
+	CAST(REPLACE(Valore,',','.') as DECIMAL(18,10)) AS Valore,
+	Molecola
+FROM dbo.StagingEsperimento
+
+/*Creo la tabella di ricezione dei dati (Esperimento)*/
+CREATE TABLE dbo.Esperimento(
+	IdEsperimento INT PRIMARY KEY NOT NULL,
+	Data Date NOT NULL,
+	Operatore varchar(255) NOT NULL,
+	Valore decimal (18,10) NOT NULL,
+	Molecola varchar(255) NOT NULL);
+
+select * from dbo.Esperimento
+/* Provo a cariare i dati della tabella di Staging ma come mi aspettavo mi dà un errore
+relativo al campo valore*/
+
+INSERT INTO dbo.Esperimento
+    (IdEsperimento, Data, Operatore,
+	 Valore, Molecola)
+SELECT CAST(IdEsperimento AS INT) AS IdEsperimento,
+	CONVERT(date, Data, 103) AS Data,
+	Operatore,
+	CAST(REPLACE(Valore,',','.') as DECIMAL(18,10)) AS Valore,
+	Molecola
+FROM dbo.StagingEsperimento;
+
+SELECT * FROM DBO.Esperimento
+
+/* Per avere la data nel formato internazionale, si può ricostruirla usando le stringhe*/
+
+INSERT INTO dbo.Esperimento
+    (IdEsperimento, Data, Operatore,
+	 Valore, Molecola)
+SELECT CAST(IdEsperimento AS INT) AS IdEsperimento,
+	CAST(CONCAT(RIGHT(Data,4),'-',substring(Data,4,2),'-',LEFT(Data,2)) AS DATE) AS Data,
+	Operatore,
+	CAST(REPLACE(Valore,',','.') as DECIMAL(18,10)) AS Valore,
+	Molecola
+FROM dbo.StagingEsperimento;
+
+SELECT * FROM DBO.Esperimento
+
+
+/* Effettuo alcuni controlli*/
+SELECT AVG(Valore)
+FROM dbo.Esperimento
+SELECT * from Esperimento
+WHERE IdEsperimento = 321
+
+SELECT * from Esperimento
+WHERE IdEsperimento = 209
+
+select count (*) from Esperimento
+
+/*Voglio inserire nella tabella Esperimento anche i dati del secondo file csv,
+usando la tabella StagingEsperimento per l'import provvisorio.
+Pertanto, innanzitutto provvedo a eliminare i dati presenti con la funzione truncate*/
+
+TRUNCATE TABLE dbo.StagingEsperimento
+
+SELECT * FROM dbo.StagingEsperimento
+
+/*Eseguiamo la BULK INSERT per il file n.2 */
+	
+BULK INSERT dbo.StagingEsperimento
+FROM '...\Progetto_Esperimenti_2.csv'
+WITH
+(   
+    FIRSTROW = 2,
+    FIELDTERMINATOR = ';', 
+    ROWTERMINATOR = '\n',   
+    TABLOCK
+)
+
+SELECT * from StagingEsperimento
+
+/*testiamo alcune righe e il numero totale per verificare l'importazione*/
+SELECT * from StagingEsperimento
+WHERE IdEsperimento = 1
+
+SELECT * from StagingEsperimento
+WHERE IdEsperimento = 112
+
+SELECT * from StagingEsperimento
+WHERE IdEsperimento = 100
+
+select count (*) from StagingEsperimento
+
+/* Importiamo il secondo gruppo di dati dal file Staging a quello definitivo (Esperimento)
+Usiamo l'opzione con le stringhe*/
+
+INSERT INTO dbo.Esperimento
+    (IdEsperimento, Data, Operatore,
+	 Valore, Molecola)
+SELECT CAST(IdEsperimento AS INT) AS IdEsperimento,
+	CAST(CONCAT(RIGHT(Data,4),'-',substring(Data,4,2),'-',LEFT(Data,2)) AS DATE) AS Data,
+	Operatore,
+	CAST(REPLACE(Valore,',','.') as DECIMAL(18,10)) AS Valore,
+	Molecola
+FROM dbo.StagingEsperimento;
+
+SELECT * FROM DBO.Esperimento
+
+/* Effettuo alcuni controlli*/
+SELECT AVG(Valore)
+FROM dbo.Esperimento
+
+SELECT * from Esperimento
+WHERE IdEsperimento = 321
+
+SELECT * from Esperimento
+WHERE IdEsperimento = 1
+
+select count (*) from Esperimento
+
+
+
+
+/*Procedo a tentare di risolvere il quesito
+Anzitutto imposto i vincoli legati alle molecole
+I record si riducono a 141*/
+
+SELECT COUNT (*) 
+FROM Esperimento
+WHERE LEFT(Molecola,2) = 'AB' AND RIGHT(Molecola,1) = 'D'
+OR LEFT(Molecola,1) = 'F' AND RIGHT(Molecola,1) <> 'P'
+
+/*Inserisco la distinzione per operatore, inserendo anche il valore medio e la dev.standard*/
+SELECT Operatore, CONVERT(DECIMAL (18,2),AVG(Valore))  AS Media, 
+				CONVERT(DECIMAL (18,2),STDEV(Valore)) AS Ds, 
+				COUNT (*) as Num
+FROM Esperimento
+WHERE LEFT(Molecola,2) = 'AB' AND RIGHT(Molecola,1) = 'D'
+OR LEFT(Molecola,1) = 'F' AND RIGHT(Molecola,1) <> 'P'
+GROUP BY Operatore
+
+/*Creo il sottogruppo con i dati antecedenti all'introduzione del macchinario*/
+SELECT Operatore, CONVERT(DECIMAL (18,2),AVG(Valore))  AS Media, 
+				CONVERT(DECIMAL (18,2),STDEV(Valore)) AS Ds, 
+				COUNT (*) as Num
+FROM Esperimento
+WHERE Data < '2020-05-01' AND
+(LEFT(Molecola,2) = 'AB' AND RIGHT(Molecola,1) = 'D'
+OR LEFT(Molecola,1) = 'F' AND RIGHT(Molecola,1) <> 'P')
+GROUP BY Operatore
+
+/*Si tratta di 52 osservazioni*/
+SELECT COUNT (*) as Num
+FROM Esperimento
+WHERE Data < '2020-05-01' AND
+(LEFT(Molecola,2) = 'AB' AND RIGHT(Molecola,1) = 'D'
+OR LEFT(Molecola,1) = 'F' AND RIGHT(Molecola,1) <> 'P')
+
+/*Diamo un'occhiata alle date*/
+SELECT max(Data)
+FROM Esperimento
+WHERE Data < '2020-05-01' AND
+(LEFT(Molecola,2) = 'AB' AND RIGHT(Molecola,1) = 'D'
+OR LEFT(Molecola,1) = 'F' AND RIGHT(Molecola,1) <> 'P')
+
+/*Inserisco la distinzione per operatore, inserendo anche il valore medio e la dev.standard*/
+SELECT Operatore, CONVERT(DECIMAL (18,2),AVG(Valore))  AS Media, 
+				CONVERT(DECIMAL (18,2),STDEV(Valore)) AS Ds, 
+				COUNT (*) as Num
+FROM Esperimento
+WHERE Data < '2020-05-01' AND
+(LEFT(Molecola,2) = 'AB' AND RIGHT(Molecola,1) = 'D'
+OR LEFT(Molecola,1) = 'F' AND RIGHT(Molecola,1) <> 'P')
+GROUP BY Operatore
+
+/*Creo il secondo sottogruppo con i dati successivi all'introduzione del macchinario*/
+SELECT Operatore, CONVERT(DECIMAL (18,2),AVG(Valore))  AS Media, 
+				CONVERT(DECIMAL (18,2),STDEV(Valore)) AS Ds, 
+				COUNT (*) as Num
+FROM Esperimento
+WHERE Data >= '2020-05-01' AND
+(LEFT(Molecola,2) = 'AB' AND RIGHT(Molecola,1) = 'D'
+OR LEFT(Molecola,1) = 'F' AND RIGHT(Molecola,1) <> 'P')
+GROUP BY Operatore
+
+/*Si tratta di 89 osservazioni. Il totale è correttamente 141 (52+89)*/
+SELECT COUNT (*) as Num
+FROM Esperimento
+WHERE Data >= '2020-05-01' AND
+(LEFT(Molecola,2) = 'AB' AND RIGHT(Molecola,1) = 'D'
+OR LEFT(Molecola,1) = 'F' AND RIGHT(Molecola,1) <> 'P')
+
+/*Diamo un'occhiata alle date*/
+SELECT MIN(Data)
+FROM Esperimento
+WHERE Data >= '2020-05-01' AND
+(LEFT(Molecola,2) = 'AB' AND RIGHT(Molecola,1) = 'D'
+OR LEFT(Molecola,1) = 'F' AND RIGHT(Molecola,1) <> 'P')
+
+/*Proviamo a integrare i due sottogruppi attraverso una CTE
+In realtà a questo punto servirebbe una tabella degli operatori, tuttavia,
+i nquesto caso non risulta necessaria perché posso usare una inner join tra le due cte,
+le quali hanno sempre lo stesso numero di operatori*/
+
+WITH PRIMA AS
+(SELECT Operatore, CONVERT(DECIMAL (18,2),AVG(Valore))  AS MediaP, 
+				CONVERT(DECIMAL (18,2),STDEV(Valore)) AS DsP, 
+				COUNT (*) as NumP
+				FROM Esperimento
+				WHERE Data < '2020-05-01' AND
+				(LEFT(Molecola,2) = 'AB' AND RIGHT(Molecola,1) = 'D'
+				OR LEFT(Molecola,1) = 'F' AND RIGHT(Molecola,1) <> 'P')
+				GROUP BY Operatore),
+	DOPO AS
+	(SELECT Operatore, CONVERT(DECIMAL (18,2),AVG(Valore))  AS MediaD, 
+				CONVERT(DECIMAL (18,2),STDEV(Valore)) AS DsD, 
+				COUNT (*) as NumD
+				FROM Esperimento
+				WHERE Data >= '2020-05-01' AND
+				(LEFT(Molecola,2) = 'AB' AND RIGHT(Molecola,1) = 'D'
+				OR LEFT(Molecola,1) = 'F' AND RIGHT(Molecola,1) <> 'P')
+				GROUP BY Operatore)
+SELECT P.Operatore,MediaP,MediaD,
+	(MediaD-MediaP) as Diff,
+	CONVERT(DECIMAL (18,2),((MediaD-MediaP)/MediaP*100)) as DiffPer
+FROM   PRIMA AS P
+INNER JOIN DOPO AS D
+	ON P.Operatore = D.Operatore
+
+/*SECONDA VERSIONE: 
+Inseriamo il filtro sulle molecole in testa, in un CTE dedicata (FILTRO)
+Di conseguenza si alleggeriscono le due successive CTE (PRIMA e DOPO)*/
+WITH FILTRO AS
+	(SELECT*
+	FROM dbo.Esperimento
+	WHERE LEFT(Molecola,2) = 'AB' AND RIGHT(Molecola,1) = 'D'
+	OR LEFT(Molecola,1) = 'F' AND RIGHT(Molecola,1) <> 'P'),
+	PRIMA AS
+	(SELECT Operatore, CONVERT(DECIMAL (18,2),AVG(Valore))  AS MediaP, 
+				CONVERT(DECIMAL (18,2),STDEV(Valore)) AS DsP, 
+				COUNT (*) as NumP
+				FROM FILTRO
+				WHERE Data < '2020-05-01' 
+				GROUP BY Operatore),
+	DOPO AS
+	(SELECT Operatore, CONVERT(DECIMAL (18,2),AVG(Valore))  AS MediaD, 
+				CONVERT(DECIMAL (18,2),STDEV(Valore)) AS DsD, 
+				COUNT (*) as NumD
+				FROM FILTRO
+				WHERE Data >= '2020-05-01' 
+				GROUP BY Operatore)
+SELECT P.Operatore,MediaP,MediaD,
+	(MediaD-MediaP) as Diff,
+	CONVERT(DECIMAL (18,2),((MediaD-MediaP)/MediaP*100)) as DiffPer
+FROM   PRIMA AS P
+INNER JOIN DOPO AS D
+	ON P.Operatore = D.Operatore
+
+/*TERZA VERSIONE: 
+Utilizzando case/when si calcolano già nel primo filtro le due medie (prima e dopo)
+E' necessario tuttavia sempre eseguire una cte se si vogliono riportare le differenze
+Utile inserire una condizione sul numeratore nullo quando stimiamo la percentuale*/
+WITH FILTRO AS (
+		SELECT Operatore, 
+				CONVERT(DECIMAL (18,2),AVG(CASE WHEN Data < '20200501'
+				THEN Valore ELSE NULL END))  AS MediaP,
+				CONVERT(DECIMAL (18,2),AVG(CASE WHEN Data >= '20200501'
+				THEN Valore ELSE NULL END))  AS MediaD
+			FROM dbo.Esperimento
+			WHERE LEFT(Molecola,2) = 'AB' AND RIGHT(Molecola,1) = 'D'
+			OR LEFT(Molecola,1) = 'F' AND RIGHT(Molecola,1) <> 'P'
+		GROUP BY Operatore)
+SELECT Operatore, 
+		MediaP, 
+		MediaD, 
+		MediaD-MediaP as Diff, 
+		CONVERT(DECIMAL (18,2),CASE WHEN MediaP=0 THEN NULL 
+		ELSE (MediaD-MediaP)/MediaP*100 END) as DiffPer
+FROM FILTRO
+/*DOMANDA: COME RIPORTARE IL TOTALE ED I PARZIALI IN UN'UNICA TABELLA? Vedere email 11/2/25*/
+/*Provo a creare pertanto una nuova query senza il raggruppamento per operatore
+La query funziona ma in questo modo non riesco però a legarla alla precedente in un unica tabella*/
+WITH FILTROM AS (SELECT
+				CONVERT(DECIMAL (18,2),AVG(CASE WHEN Data < '20200501'THEN Valore ELSE NULL END))  AS MediaP,
+				CONVERT(DECIMAL (18,2),AVG(CASE WHEN Data >= '20200501'THEN Valore ELSE NULL END))  AS MediaD
+			FROM dbo.Esperimento
+			WHERE LEFT(Molecola,2) = 'AB' AND RIGHT(Molecola,1) = 'D'
+			OR LEFT(Molecola,1) = 'F' AND RIGHT(Molecola,1) <> 'P'
+		)
+SELECT  'Totale' as Operatore, 
+		MediaP, 
+		MediaD, 
+		MediaD-MediaP as Diff, 
+		CONVERT(DECIMAL (18,2),CASE WHEN MediaP=0 THEN NULL ELSE (MediaD-MediaP)/MediaP*100 END) as DiffPer
+FROM FILTROM
+
+/*Soluzione : Tabelle temporanee 
+Con l'uso delle tabelle temporanee posso creare tabelle da unire poi successivamente.
+In pratica, creo una prima tabella con la stima delle medie ed i filtri per data e molecola (Totale1)
+Una seconda tabella, creata a partire dalla prima, che espone i risultati (Totale2).
+Analogamente procedo con i dati distinti per operatore (tabb. Operatore 1 e 2)*/
+*/
+
+
+SELECT 
+	CONVERT(DECIMAL (18,2),AVG(CASE WHEN Data < '20200501'THEN Valore ELSE NULL END))  AS MediaP,
+	CONVERT(DECIMAL (18,2),AVG(CASE WHEN Data >= '20200501'THEN Valore ELSE NULL END))  AS MediaD
+INTO	#Totale1
+FROM dbo.Esperimento
+	WHERE LEFT(Molecola,2) = 'AB' AND RIGHT(Molecola,1) = 'D'
+	OR LEFT(Molecola,1) = 'F' AND RIGHT(Molecola,1) <> 'P'
+	
+SELECT  'Totale' as Operatore, 
+		MediaP, 
+		MediaD, 
+		MediaD-MediaP as Diff, 
+		CONVERT(DECIMAL (18,2),CASE WHEN MediaP=0 THEN NULL ELSE (MediaD-MediaP)/MediaP*100 END) as DiffPer
+INTO	#Totale2
+FROM	#Totale1
+
+/*Risultati distinti per operatore*/
+SELECT Operatore,
+	CONVERT(DECIMAL (18,2),AVG(CASE WHEN Data < '20200501'THEN Valore ELSE NULL END))  AS MediaP,
+	CONVERT(DECIMAL (18,2),AVG(CASE WHEN Data >= '20200501'THEN Valore ELSE NULL END))  AS MediaD
+INTO	#Operatori1
+FROM dbo.Esperimento
+	WHERE LEFT(Molecola,2) = 'AB' AND RIGHT(Molecola,1) = 'D'
+	OR LEFT(Molecola,1) = 'F' AND RIGHT(Molecola,1) <> 'P'
+GROUP BY Operatore
+
+SELECT  Operatore, 
+		MediaP, 
+		MediaD, 
+		MediaD-MediaP as Diff, 
+		CONVERT(DECIMAL (18,2),CASE WHEN MediaP=0 THEN NULL ELSE (MediaD-MediaP)/MediaP*100 END) as DiffPer
+INTO	#Operatori2
+FROM	#Operatori1
+
+/*UNIONE delle tabelle Totale2 e Operatore2*/
+
+SELECT	Operatore, 
+		MediaP, 
+		MediaD, 
+		MediaD-MediaP as Diff
+FROM	#Operatori2
+UNION ALL 
+SELECT	'Totale' as Operatore, 
+		MediaP, 
+		MediaD, 
+		MediaD-MediaP as Diff
+FROM	#Totale2
+
+/*Versione per garantirsi l'ordine corretto*/
+SELECT	Operatore, 
+		MediaP, 
+		MediaD, 
+		MediaD-MediaP as Diff
+FROM	(SELECT	Operatore, 
+		MediaP, 
+		MediaD, 
+		MediaD-MediaP as Diff, 0 as Ordine
+		FROM #Operatori2
+		UNION ALL 
+		SELECT	'Totale' as Operatore, 
+		MediaP, 
+		MediaD, 
+		MediaD-MediaP as Diff, 1 as Ordine
+		FROM #Totale2) as Tab
+ORDER BY Ordine
