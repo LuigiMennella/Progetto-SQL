@@ -1,3 +1,4 @@
+# Progetto SQL
 In questa repository descrivo un mio progetto di analisi dei dati usando SQL, a partire da dati di fantasia, tratti dal corso «La scuola dei dati» (www.formazione.yimp.it).
 I dati simulano i risultati di analisi di laboratorio eseguite prima e dopo il cambio del macchinario impiegato per dette analisi.
 I dati, originariamente collocati su due diversi file csv, sono stati importati e gestiti direttamente tramite SQL.
